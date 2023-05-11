@@ -1,0 +1,466 @@
+---
+title: "Notebook Exercises Chapter 9"
+author: "Max Beauchez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(error = TRUE)
+library(rethinking)
+```
+
+**9E1.** Which of the following is a requirement of the simple Metropolis algorithm?
+
+  1. The parameters must be discrete.
+  
+  2. The likelihood function must be Gaussian.
+  
+  3. The proposal distribution must be symmetric.
+  
+Only the third statement is a requirement of the simple Metropolis algorithm. Parameters need not be discrete, and the likelihood function does not have to be Gaussian.
+
+**9E2.** Gibbs sampling is more efficient than the Metropolis algorithm. How does it achieve this extra efficiency? Are there any limitations to the Gibbs sampling strategy?
+
+Gibbs sampling achieves this efficiency by forming proposals more efficiently, by using adaptive proposals that depend on the current parameter values. This is done by using conjugate pairs of the likelihood and prior that have analytical solutions. Limitations to the Gibbs sampling strategy are this requirement to use conjugate priors and a tendency to get stuck in high-probability if some parameters are highly correlated or if there are a large number of parameters. 
+
+**9E3.** Which sort of parameters can Hamiltonian Monte Carlo not handle? Can you explain why?
+
+Hamiltonian Monte Carlo can't handle discrete parameter values, because it depends on a smooth gradient of the posterior for its sampling strategy.
+
+**9E4.** Explain the difference between the effective number of samples, `n_eff` as calculated by Stan, and the actual number of samples.
+
+`n_eff` provides an estimate of the number of independent samples (samples without autocorrelation) of a chain  that would give the same quality of samples as the actual chain. `n_eff` can be smaller than the number of samples in case of autocorrelated samples, or higher than the number of samples in case of anticorrelated samples.
+
+**9E5.** Which value should `Rhat` approach, when a chain is sampling the posterior distribution correctly?
+
+In that case `Rhat` should approach 1 from above.
+
+**9E6.** Sketch a good trace plot for a Markov chain, one that is effectively sampling for the posterior distribution. What is good about its shape? Then sketch a trace plot for a malfunctioning Markov chain. What about its shape indicates malfunction?
+
+A good trace plot:
+
+```{r}
+sampled_values <- rnorm(1e3)
+plot(1:1e3, sampled_values, xlim=c(1, 1e3), ylim=c(-3, 3), type="l")
+```
+
+A good trace plot is stationary: it stays within the hig-probability area of the posterior (here, around 0), mixes well: it explores the high-probability area of the posterior quickly, and convergent: multiple chains stick around the same high-probability area (only one chain simulated here).
+
+A bad trace plot:
+
+```{r}
+sampled_values <- c(rnorm(2e2), rnorm(4e2, mean=2, sd=0.01), rnorm(4e2, mean=-2, sd=0.1))
+plot(1:1e3, sampled_values, xlim=c(1, 1e3), ylim=c(-5, 5), type="l")
+```
+
+In contrast, this bad chain isn't stationary and mostly doesn't mix well.
+
+
+**9E7.** Repeat the problem above, but now for a trace rank plot.
+
+A good trace rank plot:
+
+```{r}
+good_chain1 <- rnorm(1e3)
+good_chain2 <- rnorm(1e3)
+good_ranks <- rank(c(good_chain1, good_chain2))
+ranks_good_chain1 <- good_ranks[1:500]
+ranks_good_chain2 <- good_ranks[501:1000]
+hist(ranks_good_chain1, col=rgb(1, 0, 0, 0.1), main="Trace rank plots good chains")
+hist(ranks_good_chain2, col=rgb(0, 0, 1, 0.1), add=TRUE)
+```
+
+Each chain has approximately the same distribution of ranks of parameter values, so the histograms are very overlapping.
+
+A bad trace rank plot:
+
+```{r}
+bad_chain1 <- c(rnorm(2e2, mean=0), rnorm(2e2, mean=2), rnorm(2e2, mean=-1), rnorm(2e2, mean=1), rnorm(2e2, mean=4))
+bad_chain2 <- c(rnorm(2e2, mean=-1), rnorm(2e2, mean=1), rnorm(2e2, mean=0), rnorm(2e2, mean=-2), rnorm(2e2, mean=1))
+bad_ranks <- rank(c(bad_chain1, bad_chain2))
+ranks_bad_chain1 <- bad_ranks[1:500]
+ranks_bad_chain2 <- bad_ranks[501:1000]
+hist(ranks_bad_chain1, col=rgb(1, 0, 0, 0.1), main="Trace rank plot bad chains")
+hist(ranks_bad_chain2, col=rgb(0, 0, 1, 0.1), add=TRUE)
+```
+
+Each chain has very different distributions of ranks of parameter values, so the histograms don't overlap much.
+
+
+**9M1.** Re-estimate the terrain ruggedness model from the chapter, but now using a uniform prior for the standard deviation, `sigma`. The uniform prior should be `dunif(0, 1)`. Use `ulam` to estimate the posterior. Does the different prior have any detectable influence on the posterior distribution of `sigma`? Why or why not?
+
+```{r warning=FALSE, message=FALSE}
+data(rugged)
+d <- rugged
+d$log_gdp <- log(d$rgdppc_2000)
+dd <- d[complete.cases(d$rgdppc_2000), ]
+dd$log_gdp_std <- dd$log_gdp / mean(dd$log_gdp)
+dd$rugged_std <- dd$rugged / max(dd$rugged)
+dd$cid <- ifelse(dd$cont_africa==1, 1, 2)
+dat_slim <- list(
+  log_gdp_std = dd$log_gdp_std,
+  rugged_std = dd$rugged_std,
+  cid = as.integer(dd$cid)
+)
+
+#sigma ~ dunif(0, 1)
+mEM1_unif <- ulam(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+    a[cid] ~ dnorm(1, 0.1),
+    b[cid] ~ dnorm(0, 0.3),
+    sigma ~ dunif(0, 1)
+ ), data=dat_slim, chains=4, cores=4)
+#sigma ~ dexp(1)
+mEM1_exp <- ulam(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+    a[cid] ~ dnorm(1, 0.1),
+    b[cid] ~ dnorm(0, 0.3),
+    sigma ~ dexp(1)
+ ), data=dat_slim, chains=4, cores=4)
+plot(coeftab(mEM1_unif, mEM1_exp), pars=c("sigma"))
+```
+
+No, the different prior does not have any discernible influence on the estimate of `sigma` (0.11 for both models). Presumably the prior is overwhelmed by the likelihood. If the real `sigma` was outside of the interval specified in the prior though, it would not be possible to estimate it, as the prior gives zero probability to values outside of the interval $[0, 1]$.
+
+
+**9M2.** Modify the terrain ruggedness model again. This time, change the prior for `b[cid]` to `dexp(0.3)`. What does this do to the posterior distribution? Can you explain it?
+
+```{r warning=FALSE, message=FALSE}
+mEM2_norm <- ulam(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+    a[cid] ~ dnorm(1, 0.1),
+    b[cid] ~ dnorm(0, 0.3),
+    sigma ~ dexp(1)
+ ), data=dat_slim, chains=4, cores=4)
+mEM2_exp <- ulam(
+  alist(
+    log_gdp_std ~ dnorm(mu, sigma),
+    mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+    a[cid] ~ dnorm(1, 0.1),
+    b[cid] ~ dexp(0.3),
+    sigma ~ dexp(1)
+ ), data=dat_slim, chains=4, cores=4)
+plot(coeftab(mEM2_norm, mEM2_exp), pars=c("b[1]", "b[2]"))
+```
+
+The prior now constrains `b[2]` to be positive, whereas previously a negative value was estimated for this parameter. We can visualize the distribution by looking at a histogram of sampled values for `b[2]` from the posterior.
+
+```{r}
+b2_samples <- extract.samples(mEM2_exp, pars=c("b[2]"))[[1]]
+hist(b2_samples, breaks=seq(from=0, to=0.15, by=1e-3))
+```
+
+We can clearly see that all the probability mass is bunched up near zero.
+
+
+**9M3.** Re-estimate one of the Stan models from the chapter, but at different numbers of `warmup` iterations. Be sure to use the same number of sampling iterations in each case. Compare the `n_eff` values. How much warmup is enough?
+
+I'll be using the model `m9.1`.
+
+```{r message=FALSE, warning=FALSE}
+fit_model <- function(n_warmup) {
+  m <- ulam(
+    alist(
+      log_gdp_std ~ dnorm(mu, sigma),
+      mu <- a[cid] + b[cid]*(rugged_std - 0.215),
+      a[cid] ~ dnorm(1, 0.1),
+      b[cid] ~ dnorm(0, 0.3),
+      sigma ~ dexp(1)
+    ),
+    data=dat_slim, 
+    chains=1,
+    warmup=n_warmup,
+    iter=n_warmup + 5e2
+  )
+  return(m)
+}
+n_warmup_samples <- c(50, 250, 500, 1000, 1500, 2000)
+models <- sapply(n_warmup_samples, fit_model)
+n_eff_values <- sapply(models, function(e) precis(e, depth=2)$n_eff)
+plot(NA, xlim=c(0, 2100), ylim=c(0, 1e3), xlab="Warmup samples", ylab="n_eff", main="n_eff for different warmup iterations (500 sampling iterations)")
+for (i in 1:5) points(n_warmup_samples, n_eff_values[i, ], pch=i)
+legend("bottomright", legend=rownames(precis(models[[1]], depth=2)), pch=1:5)
+```
+
+We can see that the `n_eff` values increase with the number of warmup iterations up until a point, and after that plateau or decline.
+
+
+**9H1.** Run the model below and then inspect the posterior distribution and explain what it is accomplishing.
+
+```{r warning=FALSE, message=FALSE}
+#9.28
+mp <- ulam(
+  alist(
+    a ~ dnorm(0, 1),
+    b ~ dcauchy(0, 1)
+ ), data=list(y=1), chains=1)
+```
+
+Compare the samples for the parameters `a` and `b`. Can you explain the different trace plots? If you are unfamiliar with the Cauchy distribution, you should look it up. The key feature to attend to is that it has no expected value. Can you connect this fact to the trace plot?
+
+`ulam` is sampling the priors here (there is no linear model specified, and thus no likelihood). 
+
+```{r}
+precis(mp)
+```
+
+We can see that it estimated the `mean` and `sd` of the parameter `a` with a $Normal(0, 1)$ prior well.  
+
+```{r}
+samples_posterior <- extract.samples(mp)
+dens(samples_posterior$a)
+dens(samples_posterior$b, col="blue", add=TRUE)
+traceplot(mp)
+```
+
+The exploration of parameter `b` in the traceplot shows that extreme values are often explored. This is expected for the Cauchy distribution, which has undefined mean and variance, and heavy tails (but mode $x_{0}$, here 0, which does seem to be the modal value).
+
+**9H2.** Recall the divorce rate example from Chapter 5. Repeat that analysis, using `ulam` this time, fitting models `m5.1`, `m5.2`, and `m5.3`. Use `compare` to compare the models on the basis of WAIC or PSIS. To use WAIC or PSIS with `ulam`, you need to add the argument `log_log=TRUE`. Explain the model comparison results.
+
+First of all, `ulam` doesn't have the argument `log_log`; this should be `log_lik`.
+
+```{r warning=FALSE, message=FALSE}
+data("WaffleDivorce")
+d <- WaffleDivorce
+d_slim <- list()
+#standardize
+d_slim$D <- standardize(d$Divorce)
+d_slim$M <- standardize(d$Marriage)
+d_slim$A <- standardize(d$MedianAgeMarriage)
+m5.1 <- ulam(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bA * A,
+    a ~ dnorm(0, 0.2),
+    bA ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data = d_slim,
+  log_lik=TRUE
+)
+m5.2 <- ulam(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bM * M,
+    a ~ dnorm(0, 0.2),
+    bM ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data=d_slim,
+  log_lik=TRUE
+)
+m5.3 <- ulam(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bM*M + bA*A,
+    a ~ dnorm(0, 0.2),
+    bM ~ dnorm(0, 0.5),
+    bA ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), 
+  data=d_slim,
+  log_lik=TRUE
+)
+compare(m5.1, m5.2, m5.3, func=PSIS)
+```
+
+`m5.1`, which only uses the median age at marriage to predict the divorce rate, has the best PSIS score. The score of model `m5.3`, which uses both the marriage rate and the median age at marriage as predictors, is a close second. This means that `m5.1` is expected to have the best predictive accuracy, followed closely by `m5.3`.
+
+
+**9H3.** Sometimes changing a prior for one parameter has unanticipated effects on other parameters. This is because when a parameter is highly correlated with another parameter in the posterior, the prior influences both parameters. Here's an example to work and think through.
+
+Go back to the leg length example in Chapter 6 and use the code there to simulate height and leg lengths for 100 imagined individuals. Below is the model you fit before, resulting a highly correlated posterior for the two beta parameters. This time, fit the model using `ulam`:
+
+```{r}
+N <- 100
+set.seed(909)
+height <- rnorm(N, 10, 2)
+leg_prop <- runif(N, 0.4, 0.5)
+leg_left <- leg_prop*height + rnorm(N, 0, 0.02)
+leg_right <- leg_prop*height + rnorm(N, 0, 0.02)
+d <- data.frame(height, leg_left, leg_right)
+#9.29
+m5.8s <- ulam(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + bl*leg_left + br*leg_right,
+    a ~ dnorm(10, 100),
+    bl ~ dnorm(2, 10),
+    br ~ dnorm(2, 10),
+    sigma ~ dexp(1)
+ ), data=d, chains=4, cores=4, log_lik=TRUE, #for the next exercise
+  start=list(a=10, bl=0, br=0.1, sigma=1))
+```
+
+Compare the posterior distribution produced by the code above to the posterior distribution produced when you changed the prior for `br` so that is it strictly positive.
+
+```{r}
+#9.30
+m5.8s2 <- ulam(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + bl*leg_left + br*leg_right,
+    a ~ dnorm(10, 100),
+    bl ~ dnorm(2, 10),
+    br ~ dnorm(2, 10),
+    sigma ~ dexp(1)
+  ), data=d, chains=4, cores=4, log_lik=TRUE, #for the next exercise
+  constraints=list(br="lower=0"),
+  start=list(a=10, bl=0, br=0.1, sigma=1))
+```
+
+Note the `constraints` list. What this does is constrain the prior distribution of `br` so that it has positive probability only above zero. In other words, that prior ensures that the posterior distribution for `br` will have no probability mass below zero. Compare the two posterior distributions for `m5.8s` and `m5.8s2`. What has changed in the posterior distribution of both beta parameters? Can you explain the change induced by the change in prior?
+
+The values for `bl` and `br` are strongly negatively correlated, in both models:
+
+```{r}
+cor(samples_posterior_m5.8s$bl, samples_posterior_m5.8s$br)
+cor(samples_posterior_m5.8s2$bl, samples_posterior_m5.8s2$br)
+```
+
+Below the code to plot the density of 500 samples from the posterior for parameters `bl` and `br` in both models.
+
+```{r}
+samples_posterior_m5.8s <- extract.samples(m5.8s, pars=c("bl", "br"))
+samples_posterior_m5.8s2 <- extract.samples(m5.8s2, pars=c("bl", "br"))
+dens(samples_posterior_m5.8s$bl, ylim=c(0, 0.3))
+dens(samples_posterior_m5.8s$br, lt="dashed", add=TRUE)
+dens(samples_posterior_m5.8s2$bl, col="blue", add=TRUE)
+dens(samples_posterior_m5.8s2$br, col="red", add=TRUE)
+mtext("Density of bl and br samples for m5.8s and m5.8s2")
+legend("topright", legend=c("bl m5.8s", "br m5.8s", "bl m5.8s2", "br m5.8s2"), lty=c(1, 2, 1, 1), col=c("black", "black", "blue", "red"))
+```
+
+We can see that in `m5.8s2`, where `br` is constrained to be above zero, this also effectively constraint `bl` to be *below* zero, due to the strong negative correlation between `br` and `bl`.
+
+
+**9H4.** For the two models fit in the previous problem, use WAIC or PSIS to compare the effective numbers of parameters for each model. You will need to use `log_lik=TRUE` to instruct `ulam` to compute the terms that both WAIC and PSIS need. Which model has more effective parameters? Why?
+
+```{r}
+compare(m5.8s, m5.8s2, func=WAIC)
+```
+
+Looking at the **pWAIC** column, we see that `m5.8s2`, with the constrained parameters, has a lower effective number of parameters ($p_{WAIC}$). Given the formula for $p_{WAIC} = \sum_{i} var_{\theta}\,log\, p(y_{i}|\theta))$, it makes sense that the variance of $log\, p(y_{i}|\theta))$ would be smaller with a constrained $\theta$.
+
+
+**9H5.** Modify the Metropolis algorithm code from the chapter to handle the case that the island populations have a different distribution than the island labels. That means the island's number will not be the same as its population.
+
+```{r}
+metropolis <- function(island_populations) {
+  num_weeks <- 1e5
+  positions <- rep(0, num_weeks)
+  current_island <- 10
+  for (i in 1:num_weeks) {
+    # record current position
+    positions[i] <- current_island
+    # flip coin to generate proposal island
+    proposal_island <- current_island + sample(c(-1,1), size=1)
+    # now make sure he loops around the archipelago
+    if (proposal_island < 1) proposal_island <- 10
+    if (proposal_island > 10) proposal_island <- 1
+    # move?
+    prob_move <- island_populations[proposal_island]/island_populations[current_island]
+    current_island <- ifelse(runif(1) < prob_move, proposal_island, current_island)
+  }
+  return(positions)
+}
+plot(table(metropolis(c(1:5, 5:1))), main="Island populations c(1:5, 5:1)")
+plot(table(metropolis(rep(5, 10))), main="Island populations equal")
+```
+
+
+**9H6.** Modify the Metropolis algorithm code from the chapter to write your own simple MCMC estimator for globe tossing data and model from Chapter 2.
+
+Below the adapted code, with comments for explanation.
+
+```{r}
+metropolis_globe <- function(x, size, n_steps=1e5, by=0.02) {
+  parameter_values <- rep(0, n_steps)
+  # random initial value
+  current_value <- round(runif(1, min=0, max=1), 2)
+  # run the chain
+  for (i in 1:n_steps) {
+    # store current parameter value
+    parameter_values[i] <- current_value
+    # generate the proposal value
+    proposal_value <- current_value + sample(c(-by, by), size=1)
+    # wrap around: proposal value needs to be between 0 and 1
+    if (proposal_value > 1) proposal_value <- 0
+    if (proposal_value < 0) proposal_value <- 1
+    # calculate the probabilities of the proposal and current value
+    p_proposal <- dbinom(x, size, prob=proposal_value)
+    p_current <- dbinom(x, size, prob=current_value)
+    # calculate the acceptance ratio
+    p_move <- p_proposal / p_current
+    # accept or reject the new value
+    current_value <- ifelse(runif(1) < p_move, proposal_value, current_value)
+  }
+  return(parameter_values)
+}
+# 6 out of 12 water
+v <- metropolis_globe(6, 12)
+plot(table(v))
+# 1 out of 8 water
+v <- metropolis_globe(1, 8)
+plot(table(v))
+```
+
+
+**9H7.** Can you write your own Hamiltonian Monte Carlo algorithm for the globe tossing data, using the R code in the chapter? You will have to write your own functions for the likelihood and gradient, but you can use the `HMC2` function.
+
+Below the code with explanatory comments.
+
+```{r warning=FALSE}
+U_globe <- function(q) {
+  # sum of log-likelihood and log-prior 
+  U <- dbinom(y, size=n, prob=q, log=TRUE) + dunif(q, min=0, max=1, log=TRUE)
+  return(-U)
+}
+
+U_gradient_globe <- function(q) {
+  # the derivative of dunif = 0 (it's a flat line independent of p), so we can disregard this term here
+  # log(U) = log(choose(n, y)*q^y*(1-q)^(n-y) = log(choose(n, y) + y*log(q) + (n - y)*log(1 - q)
+  # dlog(U)/dq = y/q - (n - y)/(1 - q) = (y - n*q)/(q - q^2)
+  G <- (y - n*q)/(q*(1 - q))
+  return(-G) # negative bc energy is neg-log-prob
+}
+
+HMC_globe <- function(iter=1e3, start_position=runif(1, min=0, max=1), step_size=0.01, n_steps=10) {
+  # list of trajectories that were followed
+  trajectories <- rep(NA, iter)
+  # accepted samples from chain
+  accepted_samples <- list()
+  
+  current_position <- start_position
+  
+  for (i in 1:iter) {
+    # proposed trajectory
+    Q_proposal <- HMC2(U_globe, U_gradient_globe, step_size, n_steps, current_position)
+    # check if proposal larger than 1 or smaller than 0
+    if (Q_proposal$q > 1) Q_proposal$accept <- 0
+    if (Q_proposal$q < 0) Q_proposal$accept <- 0
+    # if the proposal should be accepted
+    if (Q_proposal$accept == 1) {
+      # update current position
+      current_position <- Q_proposal$q
+      # add the current position to the list of accepted samples
+      accepted_samples <- append(accepted_samples, current_position)
+    }
+    # save trajectory
+    trajectories[i] <- Q_proposal
+  }
+  return(list(trajectories=trajectories, accepted_samples=as.numeric(accepted_samples)))
+}
+y <- 6
+n <- 9
+chain <- HMC_globe(iter=1e4)
+dens(chain$accepted_samples)
+```
+

@@ -1,0 +1,168 @@
+---
+title: "Notebook Exercises Chapter 13"
+author: "Max Beauchez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+**13E1.** Which of the following priors will produce more *shrinkage* in the estimates? (a) $\alpha_{TANK} \sim Normal(0, 1)$; (b) $\alpha_{TANK} \sim Normal(0, 2)$.
+
+The first one, as it has a smaller prior for the standard deviation.
+
+
+**13E2.** Rewrite the following model as a multilevel model.
+
+$y_{i} \sim Binomial(1, p_{i})$
+
+$logit(p_{i}) = \alpha_{GROUP[i]} + \beta x_{i}$
+
+$\alpha_{GROUP} \sim Normal(0, 1.5)$
+
+$\beta \sim Normal(0, 0.5)$
+
+To turn this model in to multilevel model we need to make the prior for $\alpha_{GROUP}$ a function of two new parameters, $\bar{\alpha}$ and $\sigma_{\alpha}, each with their own hyper-priors.
+
+$y_{i} \sim Binomial(1, p_{i})$
+
+$logit(p_{i}) = \alpha_{GROUP[i]} + \beta x_{i}$
+
+$\alpha_{GROUP} \sim Normal(\bar{\alpha}, \sigma_{\alpha})$
+
+$\bar{\alpha} \sim Normal(0, 1)$
+
+$\sigma_{\alpha} \sim Exponential(1)$
+
+$\beta \sim Normal(0, 0.5)$
+
+
+**13E3.** Rewrite the following model as a multilevel model.
+
+$y_{i} \sim Normal(\mu_{i}, \sigma)$
+
+$\mu_{i} = \alpha_{GROUP[i]} + \beta x_{i}$
+
+$\alpha_{GROUP} \sim Normal(0, 5)$
+
+$\beta \sim Normal(0, 1)$
+
+$\sigma \sim Exponential(1)$
+
+As before, we make the prior for $\alpha_{GROUP[i]}$ a function of two new parameters, $\bar{\alpha}$ and $\sigma_{\alpha}$, each with their own hyper-priors.
+
+$y_{i} \sim Normal(\mu_{i}, \sigma)$
+
+$\mu_{i} = \alpha_{GROUP[i]} + \beta x_{i}$
+
+$\alpha_{GROUP} \sim Normal(\bar{\alpha}, \sigma_{\alpha})$
+
+$\bar{\alpha} \sim Normal(0, 1)$
+
+$\sigma_{\alpha} \sim Exponential(1)$
+
+$\beta \sim Normal(0, 1)$
+
+$\sigma \sim Exponential(1)$
+
+
+**13E4.** Write a mathematical model formula for a Poisson regression with varying intercepts.
+
+Without any knowledge of what this model is used for I can't choose any meaningful priors, so the numbers in the below definition are just placeholders.
+
+$y_{i} \sim Poisson(\lambda_{i})$
+
+$log\,(\lambda_{i}) = \alpha_{i} + \beta x_{i}$
+
+$\alpha \sim Normal(\bar{\alpha}, \sigma_{\alpha})$
+
+$\bar{\alpha} \sim Normal(0, 1)$
+
+$\sigma_{\alpha} \sim Exponential(1)$
+
+$\beta \sim Normal(0, 1)$
+
+
+**13E5.** Write a mathematical model formula for a Poisson regression with two different kinds of varying intercepts, a cross-classified model.
+
+As before, any numerical values are pro forma, as no information is given about what is being modelled.
+
+$y_{i} \sim Poisson(\lambda_{i})$
+
+$log\,(\lambda_{i}) = \alpha_{i} + \gamma_{i} + \beta x_{i}$
+
+$\alpha \sim Normal(\bar{\alpha}, \sigma_{\alpha})$
+
+$\bar{\alpha} \sim Normal(0, 1)$
+
+$\sigma_{\alpha} \sim Exponential(1)$
+
+$\gamma_{i} \sim Normal(\bar{\gamma}, \sigma_{\gamma})$
+
+$\bar{\gamma} \sim Normal(0, 1)$
+
+$\sigma_{\gamma} \sim Exponential(1)$
+
+$\beta \sim Normal(0, 1)$
+
+
+**13M1.** Revisit the Reed frog survival data, `data(reedfrogs)`, and add the `predation` and `size` treatment variables to the varying intercepts model. Consider models with either main effect alone, both main effects, as well as a model including both and their interaction. Instead of focusing on inferences about these two predictor variables, focus on the inferred variation across tanks. Explain why it changes as it does across models.
+
+```{r}
+data(reedrogs)
+d <- reedfrogs
+
+```
+
+
+
+**13M2.** Compare the models you fit just above, using WAIC. Can you reconcile the differences in WAIC with the posterior distributions of the models?
+
+
+**13M3.** Re-estimate the basic Reed frog varying intercept model, but now using a Cauchy distribution in place of the Gaussian distribution for the varying intercepts. That is, fit this model:
+
+$s_{i} \sim Binomial(n_{i}, p_{i})$
+
+$logit(p_{i}) = \alpha_{TANK[i]}$
+
+$\alpha_{TANK} \sim Cauchy(\alpha, \sigma)$
+
+$\alpha \sim Normal(0, 1)$
+
+$\sigma \sim Exponential(1)$
+
+(You are likely to see many divergent transitions for this model. Can you figure out why? Can you fix them? Compare the posterior means of the intercepts, $\alpha_{TANK}$, to the posterior means produced in the chapter, using the customary Gaussian prior. Can you explain the pattern of differences? Take note of any change in the mean $\alpha$ as well).
+
+
+**13M4.** Now us ea Student-t distribution with $\nu = 2$ for the intercepts: 
+
+$\alpha_{TANK} \sim Student(2, \alpha, \sigma)$
+
+Refer back to the Student-t example in Chapter 7 (page 234), if necessary. Compare the resulting posterior to both the original model and the Cauchy model in 13M3. Can you explain the differences and similarities in shrinkage in terms of the properties of these distributions?
+
+
+**13M5.** Modify the cross-classified chimpanzees model `m13.4` so that the adaptive prior for blocks contains a parameter $\bar{\gamma}$ for its mean:
+
+$\gamma_{j} \sim Normal(\bar{\gamma}, \sigma_{\gamma}$
+$\bar{\gamma} \sim Normal(0, 1.5)$
+
+Compare thi smodel to `m13.4`. What has including $\bar{\gamma}$ done?
+
+
+**13M6.**
+
+
+**13H1.**
+
+
+**13H2.**
+
+
+**13H3.**
+
+
+**13H4.**
+
+
