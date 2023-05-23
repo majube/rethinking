@@ -625,10 +625,13 @@ Now we see that the effect of log(`brain`) on `social_learning` is much smaller:
 
   c. Draw a DAG to represent how you think the variables `social_learning`, `brain` and `research_effort` interact. Justify the DAG with the measured associations in the two models above (and any other models you used).
   
+I suspect that more research effort (E) goes to primates with larger brains (B), that larger brains also contribute to greater social learning (L), and that higher research effort is associated with higher social learning (no or less research effort means no or less evidence for this). In DAG terms:
+  
 ```{r}
 primates_dag <- dagitty("dag{B -> L; B -> E; E -> L}")
 coordinates(primates_dag) <- list(x=c(B=0, E=0.5, L=1), y=c(B=0, E=-0.5, L=0))
 drawdag(primates_dag)
 ```
-  
+
+This is consistent with the two models that were fitted: in the first model, looking at the total effect of brain size on social learning, the association between the two variables was greater than in the second model, where research effort was added. This is consistent with research effort being a pipe between brain size and social learning.
 
