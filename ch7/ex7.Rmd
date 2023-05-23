@@ -1,0 +1,429 @@
+---
+title: "Notebook Exercises Chapter 7"
+author: "Max Beauchez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+```
+
+**7E1.** State the three motivating criteria that define information entropy. Try to express each in your own words.
+
+  1. The measure of uncertainty should be continuous: small changes in uncertainty should result in small changes in information entropy.
+  2. The measure of uncertainty should be related to the number of possible outcomes: if there are more possible outcomes, the information entropy should be higher.
+  3. The measure of uncertainty should be additive: the sum of the information entropy of the combination of separate events should equal the sum of the information entropy of the separate events. 
+
+
+**7E2.** Suppose a coin is weighted such that, when it is tossed onto a table, it comes up heads 70% of the time. What is the entropy of this coin?
+
+The entropy is given by $H(p) = -E\,log\,(p_{i}) = -\sum_{i=1}^{n}p_{i}\,log\,(p_{i})$.
+
+```{r}
+p <- c(0.7, 0.3)
+-sum(p*log(p))
+```
+
+
+**7E3.** Suppose a four-sided die is loaded such that, when tossed onto a table, it shows "1"20%, "2" 25%, "3' 25%, and "4" 30% of the time. What is the entropy of this die?
+
+```{r}
+p <- c(0.2, 0.25, 0.25, 0.3)
+-sum(p*log(p))
+```
+
+
+**7E4.** Suppose another four-sided die is loaded such that it never shows "4". The other three sides show equally often. What is the entropy of this die?
+
+For the purposes of calculating information entropy, $log\,0 \equiv 0$. So the information entropy of a four-sided die that with $p(0) = 0$ is the same as the information entropy of a three-sided die with probability $1 \over 3$ for sides 1-3.
+
+```{r}
+p <- c(1/3, 1/3, 1/3)
+-sum(p*log(p))
+```
+
+
+**7M1.** Write down and compare the definitions of AIC and WAIC. Which of these criteria is most general? Which assumptions are required to transform the more general criterion into a less general one?
+
+The definition of AIC is $AIC = D_{train} + 2p = -2 lppd + 2p = -2 \times \sum_{i} log\,{1 \over S} \sum_{s}p(y_{i}|\Theta_{s}) + 2p$, with *lppd* being the log-pointwise predictive density and *p* the number of free parameters in the posterior distribution.
+
+The definition of WAIC is $WAIC(y, \Theta) = -2(lppd - \sum_{i} var_{\theta}\,log\,p(y_{i}|\theta)) = -2(\sum_{i} log\,{1 \over S} \sum_{s}p(y_{i}|\Theta_{s}) - \sum_{i} var_{\theta}\,log\, p(y_{i}|\theta))$, where *y* is the observations and $\Theta$ is the posterior distribution.
+
+These two criteria are very similar and only differ in the second term. WAIC is the more widely applicable information criterion, as it makes no assumptions about the shape of the posterior distribution. AIC assumes that the priors are flat or overwhelmed by the likelihood, the posterior distribution is approximately multivariate Gaussian, and that the sample size of *N* is much greater than the number of parameters *k*. If these assumptions are met, we would assume WAIC and AIC to be approximately the same.
+
+
+**7M2.** Explain the difference between model *selection* and model *comparison*. What information is lost under model selection?
+
+Model *selection* focuses on choosing one model out of a set of models that being considered, and discarding the others afterwards. Model *comparison* uses multiple models to understand how different variables affect predictions and can be used to infer causal relationships (using implied conditional independences of causal models). When selecting a model, meaningful information about the differences between criteria values is lost. The selected model might also be confounded, because confounded models can have better predictive accuracy than non-confounded ones. 
+
+
+**7M3.** When comparing models with an information criterion, why must all models be fit to exactly the same observations? What would happen to the information criterion values, if the models were fit to different numbers of observations? Perform some experiments, if you are not sure.
+
+The values of information criteria depend on both the number of observations and the observed values; a different number of observations or a different set of observations would result in different values for the information criteria. An example below:
+
+```{r}
+gen_data <- function(N) {
+  x <- standardize(rnorm(N))
+  y <- standardize(rnorm(N, mean=4 + 7*x))
+  list(x=x, y=y)
+}
+
+fit_model <- function(d) {
+  quap(
+    alist(
+      y ~ dnorm(mu, sigma),
+      mu <- a + b*x,
+      a ~ dnorm(0, 1),
+      b ~ dnorm(0, 1),
+      sigma ~ dexp(1)
+    ), data=d
+  )
+}
+
+gen_fit <- function(N) {
+  data <- gen_data(N)
+  fit_model(data)
+}
+
+# 3 different data sets of the same data generating process; 2 with 100 and one with 500 observations
+m1 <- gen_fit(100)
+m2 <- gen_fit(500)
+m3 <- gen_fit(100)
+
+compare(m1, m2, m3, func=WAIC)
+```
+
+
+
+**7M4.** What happens to the effective number of parameters, as measured by PSIS or WAIC, as a prior becomes more concentrated? Why? Perform some experiments, if you are not sure.
+
+The "effective number of parameters" term (also know as *pWAIC*) in the WAIC is given by $\sum_{i} var_{\theta}\,log\, p(y_{i}|\theta)$.
+
+With tighter priors I expect less overfitting, and thus smaller values for $log\, p(y_{i}|\theta)$ and the variance thereof, and a smaller sum when summed over the observations. The penalty term should thus have a smaller value.
+
+```{r}
+mdef_narrow_prior <- alist(
+  y ~ dnorm(mu, sigma),
+  mu <- a + b*x,
+  a ~ dnorm(0, 1),
+  b ~ dnorm(0, 0.01),
+  sigma ~ dexp(1)
+)
+mdef_wide_prior <- alist(
+  y ~ dnorm(mu, sigma),
+  mu <- a + b*x,
+  a ~ dnorm(0, 1),
+  b ~ dnorm(0, 5),
+  sigma ~ dexp(1)
+)
+calculate_pWAIC <- function(mdef) {
+  n_obs <- 1e2
+  d <- gen_data(n_obs)
+  m <- quap(mdef, data=d)
+  n_samples <- 1e3
+  post <- extract.samples(m, n=n_samples)
+  calc_logprob <- function(s) {
+    mu <- post$a[s] + post$b[s]*d$x
+    dnorm(d$y, mu, post$sigma[s], log=TRUE)
+  }
+  logprob <- sapply(1:n_samples, calc_logprob)
+  sum(sapply(1:n_obs, function(i) var(logprob[i, ])))
+}
+n_sims <- 50
+pWAIC_narrow_prior <- replicate(
+  n_sims, tryCatch(calculate_pWAIC(mdef_narrow_prior), error=function(e) NA))
+pWAIC_wide_prior <- replicate(
+  n_sims, tryCatch(calculate_pWAIC(mdef_wide_prior), error=function(e) NA))
+hist(pWAIC_narrow_prior, col=rgb(0,0,1,0.2), xlim=c(1, 5), main="pWAIC values", xlab="Value")
+hist(pWAIC_wide_prior, col=rgb(1,0,0,0.2), add=TRUE)
+```
+
+The pWAIC values for the model with the wide priors (in red) are clearly higher than those for the model with the narrow priors (in blue).
+
+
+**7M5.** Provide an informal explanation of why informative priors reduce overfitting.
+
+Informative priors reduce overfitting by limiting restricting the parameters values to plausible values. Because of this, the model doesn't learn too much from the particularities of any sample.
+
+
+**7M6.** Provide an informal explanation of why overly informative priors result in underfitting.
+
+Overly informative priors restrict the parameters too much, and as a result the model may not be able to learn the regular features in the sample, and just return the given priors.
+
+
+**7H1.** In 2007, *The Wall Street Journal*, published an editorial ("We're Number One, Alas") with a graph of corporate tax rates in 29 countries plotted against tax revenue. A badly fit curve was drawn in (reconstructed at right), seemingly by hand, to make the argument that the relationship between tax rate and tax revenue increases and then declines, such that higher tax rates can actually produce less tax revenue. I want you to actually fit a curve to these data, found in `data(Laffer)`. Consider models that use tax rate to predict tax revenue. Compare, using WAIC or PSIS, a straight line model to any curved models you like. What do you conclude about the relationship between tax rate and tax revenue?
+
+Fit one linear model and one quadratic model.
+
+```{r}
+data(Laffer)
+d <- Laffer
+d$T <- standardize(d$tax_rate)
+d$R <- standardize(d$tax_revenue)
+m_lin <- quap(
+  alist(
+    R ~ dnorm(mu, sigma),
+    mu <- a + b*T,
+    a ~ dnorm(0, 0.1),
+    b ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data=d
+)
+m_curved <- quap(
+  alist(
+    R ~ dnorm(mu, sigma),
+    mu <- a + b1*T + b2*T^2,
+    a ~ dnorm(0, 1),
+    b1 ~ dnorm(0, 1),
+    b2 ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data=d
+)
+plot(coeftab(m_lin, m_curved))
+```
+
+A look at the model fits and 89% percentage intervals.
+
+```{r}
+T_seq <- (seq(from=1, to=1e2, length.out=1e2) - mean(d$tax_rate)) / sd(d$tax_rate)
+mu_lin <- link(m_lin, list(T=T_seq))
+mu_curved <- link(m_curved, list(T=T_seq))
+mu_lin_mean <- colMeans(mu_lin)
+mu_curved_mean <- colMeans(mu_curved)
+mu_lin_PI <- apply(mu_lin, 2, PI, prob=0.89)
+mu_curved_PI <- apply(mu_curved, 2, PI, prob=0.89)
+plot(d$R ~ d$T, xlim=c(min(T_seq), max(T_seq)), xlab="Tax rate (std. dev. from mean)", ylab="Tax revenue (std. dev. from mean)", col=col.alpha(rangi2, 0.5))
+lines(T_seq, mu_lin_mean)
+shade(mu_lin_PI, T_seq)
+plot(d$R ~ d$T, xlim=c(min(T_seq), max(T_seq)), xlab="Tax rate (std. dev. from mean)", ylab="Tax revenue (std. dev. from mean)", col=col.alpha(rangi2, 0.5))
+lines(T_seq, mu_curved_mean)
+shade(mu_curved_PI, T_seq)
+```
+
+Comparison of WAIC and PSIS.
+
+```{r}
+compare(m_lin, m_curved, func=WAIC)
+compare(m_lin, m_curved, func=PSIS)
+```
+
+The differences in WAIC is much smaller than the standard error of the difference. PSIS gives a more significant difference in values; here the linear model is expected to make better predictions. Warnings about high Pareto k-values mean the estimates are probably not reliable, though.
+
+
+**7H2.** In the `Laffer` data, there is one country with a high tax revenue that is an outlier. Use PSIS and WAIC to measure the importance of this outlier in the models you fit in the previous problem. Then use robust regression with a Student's t-distribution to revisit the curve fitting problem. How much does a curved relationship depend upon the outlier point?
+
+As in the chapter I'll plot both the WAIC penalty and the calculated PSIS Pareto k values for each observation. 
+
+```{r}
+PSIS_m_lin <- PSIS(m_lin, pointwise=TRUE)
+PSIS_m_curved <- PSIS(m_curved, pointwise=TRUE)
+pWAIC_m_lin <- WAIC(m_lin, pointwise=TRUE)
+pWAIC_m_curved <- WAIC(m_curved, pointwise=TRUE)
+plot(PSIS_m_lin$k, pWAIC_m_lin$penalty, xlab="PSIS Pareto k", ylab="WAIC penalty", col=rangi2, lwd=2)
+abline(v=0.5, lt="dashed")
+plot(PSIS_m_curved$k, pWAIC_m_curved$penalty, xlab="PSIS Pareto k", ylab="WAIC penalty", col=rangi2, lwd=2)
+abline(v=0.5, lt="dashed")
+```
+
+It's clear from these values that there are two outlier value that is very influential on the posterior distribution, one extremely so. Below we re-define and re-estimate the model using a Student's t distribution, to give less weight to these outliers.
+
+```{r}
+m_curved_robust <- quap(
+  alist(
+    R ~ dstudent(2, mu, sigma),
+    mu <- a + b1*T + b2*T^2,
+    a ~ dnorm(0, 1),
+    b1 ~ dnorm(0, 1),
+    b2 ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data=d
+)
+plot(coeftab(m_curved, m_curved_robust))
+```
+
+The magnitudes of the parameter estimates have changed and the uncertainty has been reduced.
+
+```{r}
+mu_curved_robust <- link(m_curved_robust, list(T=T_seq))
+mu_curved_robust_mean <- colMeans(mu_curved_robust)
+mu_curved_robust_PI <- apply(mu_curved_robust, 2, PI, prob=0.89)
+plot(d$R ~ d$T, xlim=c(min(T_seq), max(T_seq)), xlab="Tax rate (std. dev. from mean)", ylab="Tax revenue (std. dev. from mean)", col=col.alpha(rangi2, 0.5))
+lines(T_seq, mu_curved_robust_mean)
+shade(mu_curved_robust_PI, T_seq)
+```
+
+The 89% percentage interval has also narrowed, in comparison with the previous model fit.
+
+
+**7H3.** Consider three fictional Polynesian islands. On each there is a Royal Ornithologist charged by the king with surveying the bird population. They have each found the following proportions of 5 important bird species:
+
+||Species A|Species B|Species C|Species D|Species E|
+|:---------:|:---------:|:---------:|:---------:|:---------:|:---------:|
+|Island 1|0.2|0.2|0.2|0.2|0.2|
+|Island 2|0.8|0.1|0.05|0.025|0.025|
+|Island 3|0.05|0.15|0.7|0.05|0.05|
+
+Notice that each row sums to 1, all the birds. This problem has two parts. It is not computationally complicated. But it is conceptually tricky. First, compute the entropy of each island's bird distribution. Interpret these entropy values. Second, use each island's bird distribution to predict the other two. This means to compute the KL divergence of each island from the others, treating each island as if it were a statistical model of the other islands. You should end up with 6 different KL divergence values. Which island predicts the others best? Why?
+
+As before: $H(p) = -E\,log\,(p_{i}) = -\sum_{i=1}^{n}p_{i}\,log\,(p_{i})$.
+
+```{r}
+p_island_1 <- c(0.2, 0.2, 0.2, 0.2, 0.2)
+p_island_2 <- c(0.8, 0.1, 0.05, 0.025, 0.025)
+p_island_3 <- c(0.05, 0.15, 0.7, 0.05, 0.05)
+sum(-p_island_1*log(p_island_1))
+sum(-p_island_2*log(p_island_2))
+sum(-p_island_3*log(p_island_3))
+```
+
+The information entropy of the first island's bird distribution is the highest. Intuitively, this makes sense: island 2 and 3 both have one species that accounts for a large majority of the bird distribution, whereas on island 1 the population of each bird species is the same size, so it is more uncertain which bird one might observe.
+
+```{r}
+D_KL <- function(p, q) {
+  sum(p*(log(p) - log(q)))
+}
+divergences <- matrix(
+  c(
+    0, 
+    D_KL(p_island_1, p_island_2),
+    D_KL(p_island_1, p_island_3),
+    D_KL(p_island_2, p_island_1),
+    0,
+    D_KL(p_island_2, p_island_3),
+    D_KL(p_island_3, p_island_1),
+    D_KL(p_island_3, p_island_2),
+    0
+  ),
+  nrow=3, 
+  byrow=TRUE)
+divergences
+```
+
+The best predictions (lowest entropy) are made by using the distribution of the first island (first column of the matrix). As island 1 has the highest entropy, the distributions of the other two islands are less surprising. 
+
+**7H4.** Recall the marriage, age, and happiness collider bias example from Chapter 6. Run models `m6.9` and `m6.10` again (page 178). Compare these two models using WAIC (or PSIS, they will produce identical results). Which model is expected to make better predictions? Which model provides the correct causal inference about the influence of age on happiness? Can you explain why the answers to these two questions disagree?
+
+```{r}
+d <- sim_happiness(seed=1977, N_years=1e3)
+d2 <- d[d$age > 17, ]
+d2$A <- (d2$age - 18)/(65- 18)
+d2$mid <- d2$married + 1
+m6.9 <- quap(
+  alist(
+    happiness ~ dnorm(mu, sigma),
+    mu <- a[mid] + bA*A,
+    a[mid] ~ dnorm(0, 1),
+    bA ~ dnorm(0, 2),
+    sigma ~ dexp(1)
+  ), data=d2
+)
+m6.10 <- quap(
+  alist(
+    happiness ~ dnorm(mu, sigma),
+    mu <- a + bA*A,
+    a ~ dnorm(0, 1),
+    bA ~ dnorm(0, 2),
+    sigma ~ dexp(1)
+  ), data=d2
+)
+compare(m6.9, m6.10, func=WAIC)
+```
+
+Model 6.9, which contains the collider variable of marriage status is predicted to have better predictive accuracy. But model 6.10 provides the correct causal influence of age on happiness (none). The reason is that marriage status is associated with happiness, but this association is non-causal:  marriage is merely a common consequence of age and happiness.
+
+
+**7H5.** Revisit the urban fox data, `data(foxes)`, from the previous chapter's practice problems. Use WAIC or PSIS based model comparison on five different models, each using `weight` as the outcome, and containing these sets of predictor variables:
+
+  1. `avgfood + groupsize + area`
+  
+  2. `avgfood + groupsize`
+  
+  3. `groupsize + area`
+  
+  4. `avgfood`
+  
+  5. `area`
+  
+Can you explain the relative differences in WAIC scores, using the fox DAG from the previous chapter? Be sure to pay attention to the standard error of the score differences (`dSE`).
+
+The fox DAG from the previous chapter:
+
+```{r echo=FALSE}
+library(dagitty)
+fox_dag <- dagitty("dag{avgfood -> groupsize -> weight; avgfood -> weight; area -> avgfood}")
+coordinates(fox_dag) <- list(x=c(avgfood=0, area=0.5, weight=0.5, groupsize=1), y=c(avgfood=0, groupsize=0, area=-0.5, weight=0.5))
+drawdag(fox_dag)
+```
+
+Loading the data:
+
+```{r}
+data(foxes)
+d <- foxes
+d$A <- standardize(foxes$area)
+d$F <- standardize(foxes$avgfood)
+d$G <- standardize(foxes$groupsize)
+d$W <- standardize(foxes$weight)
+```
+
+The five models:
+
+```{r}
+mH5_1 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bA*A + bF*F + bG*G,
+    a ~ dnorm(0, 0.1),
+    c(bA, bF, bG) ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+mH5_2 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bF*F + bG*G,
+    a ~ dnorm(0, 0.1),
+    c(bF, bG) ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+mH5_3 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bA*A + bG*G,
+    a ~ dnorm(0, 0.1),
+    c(bA, bG) ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+mH5_4 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bF*F,
+    a ~ dnorm(0, 0.1),
+    bF ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+mH5_5 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bA*A,
+    a ~ dnorm(0, 0.1),
+    bA ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+```
+
+```{r}
+compare(mH5_1, mH5_2, mH5_3, mH5_4, mH5_5, func=WAIC)
+plot(compare(mH5_1, mH5_2, mH5_3, mH5_4, mH5_5, func=WAIC))
+```
+
+The first 3 models (`mH5_1`, `mH5_2`, `mH5_3`) have very similar WAIC scores. The ones with noticeably lower WAIC scores are `mH5_4` and `mH5_5`, the models that use only `avgfood` and `area`, respectively, as predictors.
+
+Looking at the DAG we can explain this: the first three models contain both `groupsize` and one or both of `avgfood` and `area` as predictors. Because the effect of `area` is mediated only by `avgfood`, these will have very similar predictions.
+
+The last two models don't contain `groupsize`, only `area` or `avgfood`, which will result in very similar predictions.

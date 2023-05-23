@@ -1,0 +1,467 @@
+---
+title: "Notebook Exercises Chapter 6"
+author: "Max Beauchez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rethinking)
+library(dagitty)
+```
+
+**6E1.** List three mechanisms by which multiple regression can produce false inferences about causal effects.
+
+  1. Multicollinearity: when there's a very strong association between two or more predictor variables.
+  2. Post-treatment bias: when the inclusion of a variably which is caused by another variable occludes the effect of that variable.
+  3. Collider bias: when including  the collider variable, two variables influence it but that are not causally related get associated with one another.
+
+
+**6E2.** For one of the mechanisms in the previous problem, provide an example of your choice, perhaps from your own research.
+
+An example of multicollinearity is body weight and blood pressure, which are highly correlated.
+
+
+**6E3.** List the four elemental confounds. Can you explain the conditional dependencies of each?
+
+  1. **The fork**
+  
+  ```{r echo=FALSE}
+  fork <- dagitty("dag{Z -> X; Z -> Y}")
+  coordinates(fork) <- list(x=c(X=0, Y=1, Z=0.5), y=c(X=0, Y=0, Z=1))
+  drawdag(fork)
+  ```
+  
+  *X* and *Y* are independent, conditional on *Z*.
+  
+  
+  2. **The pipe**
+  
+  ```{r echo=FALSE}
+  pipe <- dagitty("dag{X -> Z -> Y}")
+  coordinates(pipe) <- list(x=c(X=0, Z=0.5, Y=1), y=c(X=0, Z=0.5, Y=1))
+  drawdag(pipe)
+  ```
+  
+  *X* and *Y* are independent, conditional on *Z*.
+  
+  3. **The collider**
+  
+  ```{r echo=FALSE}
+  collider <- dagitty("dag{X -> Z; Y -> Z}")
+  coordinates(collider) <- list(x=c(X=0, Z=0.5, Y=1), y=c(X=1, Z=0, Y=1))
+  drawdag(collider)
+  ```
+  
+  *X* and *Y* are dependent, conditional on *Z*.
+  
+  4. **The descendant**
+  
+  ```{r echo=FALSE}
+  descendant <- dagitty("dag{X -> Z -> D; Y -> Z}")
+  coordinates(descendant) <- list(x=c(X=0, D=0.5, Z=0.5, Y=1), y=c(X=1, D=1, Z=0, Y=1))
+  drawdag(descendant)
+  ```
+  
+  *X* and *Y* are dependent, conditional on *Z* or *D*.
+
+
+**6E4.** How is a biased sample like conditioning on a collider. Think of the example at the open of the chapter.
+
+Adding a collider variable to a multiple creates a false association between two unrelated variables. Being in the sample (in the example this means being funded) can be seen as conditioning on an unobserved collider, and because of this, a false association is created between two variables (in the example, newsworthiness and trustworthiness).
+
+
+**6M1.** Modify the DAG on page 186 to include the variable *V*, an unobserved cause of *C* and *Y*: $C \leftarrow V \to Y$. Reanalyze the DAG. How many paths connect X to Y? Which must be closed? Which variables should you condition on now?
+
+The DAG with V added becomes as below:
+
+```{r echo=FALSE}
+dag_6M1 <- dagitty("dag{
+  A -> U -> X -> Y
+  U -> B
+  C -> B
+  A -> C -> Y
+  V -> C
+  V -> Y
+  U [unobserved]
+  V [unobserved]
+}")
+coordinates(dag_6M1) <- list(x=c(A=0.5, U=0, B=0.5, C=1, X=0, Y=1, V=1.5), y=c(A=0, U=0.5, B=1, C=0.5, X=1.5, Y=1.5, V=1))
+drawdag(dag_6M1)
+```
+
+Now 5 paths connect *X* to *Y*: 1 direct path and 4 indirect paths.
+
+  1. $X \to Y$
+  
+  2. $X \leftarrow U \to B \leftarrow C \to Y$
+  
+  3. $X \leftarrow U \leftarrow A \to C \to Y$
+  
+  4. $X \leftarrow U \to B \leftarrow C \leftarrow V \to Y$
+  
+  5. $X \leftarrow U \leftarrow A \to C \leftarrow V \to Y$
+
+We want to block of all paths but the direct one (path 1). The paths through *B* (2 and 4) are already closed, because the collider *B* is in them. To close paths 3 and 5 we need to condition on either *A* or *C*, but *C* is a collider in the new DAG, so we need to condition on *A*.
+
+```{r}
+adjustmentSets(dag_6M1, exposure="X", outcome="Y")
+```
+
+
+**6M2.** Sometimes, in order to avoid multicollinearity, people inspect pairwise correlations among predictors before including them in a model. This is a bad procedure, because what matters is the conditional association, not the association before the variables are included in the model. To highlight this, consider the DAG $X \to Z \to Y$. Simulate data from this DAG so that the correlation between *X* and *Z* is very large. Then include both in a model prediction *Y*. Do you observe any multicollinearity? Why or why not? What is different from the legs example in the chapter?
+
+```{r}
+# simulating the data
+N <- 1e3
+x <- rnorm(N)
+z <- rnorm(N, mean=x, sd=0.1)
+y <- rnorm(N, mean=3*z, sd=2)
+cor(x, z)
+d <- data.frame(x=x, z=z, y=y)
+# fitting the model
+m_6M2 <- quap(
+  alist(
+    y ~ dnorm(mu, sigma),
+    mu <- b_x*x + b_z*z,
+    c(b_x, b_z) ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data=d
+)
+#plot(coeftab(m_6M2))
+precis(m_6M2)
+```
+
+We see the same effect as in the legs example: when the model is fit repeatedly, the sum of `b_x`  and `b_z` is roughly constant and equal to the real coefficient (3), but their individual values are not. The standard deviations are much smaller than in the legs example though, and `b_x` is usually much smaller than `b_z`. These differences presumably are due to the different causal graphs: in the legs example, the DAG was $L \to H \leftarrow R$, whereas here the DAG is $X \to Z \to Y$, that is to say, *Z* is a pipe. After conditioning on *Z* there is little additional value in knowing the highly correlated *X*.
+
+
+**6M3.** Learning to analyze DAGs requires practice. For each of the four DAGs below, state which variables, if any, you must adjust for (condition on) to estimate the total causal influence of *X* on *Y*.
+
+```{r echo=FALSE}
+dag1 = dagitty("dag{A -> Z -> X; X -> Y; Z -> Y; A -> Y}")
+dag2 = dagitty("dag{A -> Z; A -> Y; X -> Z; X -> Y; Z -> Y}")
+coordinates(dag1) <- coordinates(dag2) <- list(x=c(X=0, Z=0.5, Y=1, A=1), y=c(X=1, Z=0, Y=1, A=0))
+dag3 = dagitty("dag{A -> Z; A -> X -> Z; X -> Y; Y -> Z}")
+dag4 = dagitty("dag{A -> X -> Y; A -> Z; X -> Z; Z -> Y}")
+coordinates(dag3) <- coordinates(dag4) <- list(x=c(X=0, Z=0.5, Y=1, A=0), y=c(X=1, Z=0, Y=1, A=0))
+dags <- list(dag1, dag2, dag3, dag4)
+drawdag(dags)
+```
+
+From left to right, top to bottom:
+
+  1. Backdoor paths from *X* to *Y*: $X\leftarrow Z \to Y$ and $X \leftarrow Z \leftarrow A \to Y$. In the first path *Z* is a fork; in the second one *Z* is a pipe and *A* is a fork. By conditioning on *Z* we can thus close both open backdoor paths.
+  ```{r}
+  adjustmentSets(dag1, exposure="X", outcome="Y")
+  ```
+  2. Indirect paths from *X* to *Y*: $X \to Z \to Y$ and $X \to Z \leftarrow A \to Y$. The first path is in an indirect causal effect of *X* on *Y*, and thus needs to be included in the estimation of the total causal effect of *X* on *Y*. The second path contains *Z* as a collider, so it's already closed. We thus don't need to condition on any other variables to estimate the total causal effect of *X* on *Y*.
+  ```{r}
+  adjustmentSets(dag2, exposure="X", outcome="Y")
+  ```
+  3. There are two indirect paths between *X* and *Y*: $X \to Z \leftarrow Y$ and $X \leftarrow A \to Z \leftarrow Y$. Both paths are closed because they contain *Z* as a collider. We thus don't need to condition on any other variables to estimate the total causal effect of *X* on *Y*.
+  ```{r}
+  adjustmentSets(dag3, exposure="X", outcome="Y")
+  ```
+  4. Again, there are two indirect paths between *X* and *Y*: $X \to Z \to Y$ and $X \leftarrow A \to Z \to Y$. Both paths are open. The first path is an indirect causal effect of *X* and *Y* and so needs to remain open. The second path is a backdoor path with *A* as a fork and *Z* as a pipe. We need to condition on *A* to estimate the total causal effect of *X* on *Y*.
+  ```{r}
+  adjustmentSets(dag4, exposure="X", outcome="Y")
+  ```
+
+
+**6H1.** Use the Waffle House data, `data(WaffleDivorce)`, to find the total causal influence of number of Waffle Houses on divorce rate. Justify your model or models with a causal graph.
+
+With the same DAG as in the chapter (below), there are three open backdoor paths between *W* and *D*:
+
+  1. $W \leftarrow S \to M \to D$
+  
+  2. $W \leftarrow S \to A \to D$
+  
+  3. $W \leftarrow S \to A \to M \to D$
+
+```{r echo=FALSE}
+waffle_dag <- dagitty("dag{
+  S -> W -> D
+  S -> A -> D
+  S -> M -> D
+  A -> M
+}")
+coordinates(waffle_dag) <- list(x=c(S=0, W=1, A=0, M=0.5, D=1), y=c(S=0, W=0, A=1, M=0.5, D=1))
+drawdag(waffle_dag)
+```
+
+We can close all these paths by conditioning on *S*.
+
+Check with `adjustmentSets`:
+
+```{r}
+adjustmentSets(waffle_dag, exposure="W", outcome="D")
+```
+
+Model estimation:
+
+```{r}
+data("WaffleDivorce")
+d <- WaffleDivorce
+d$D <- standardize(d$Divorce)
+d$M <- standardize(d$Marriage)
+d$A <- standardize(d$MedianAgeMarriage)
+d$S <- d$South
+d$W <- standardize(d$WaffleHouses)
+m_waffle_divorce <- quap(
+  alist(
+    D ~ dnorm(mu, sigma),
+    mu <- a + bS*S + bW*W,
+    a ~ dnorm(0, 1),
+    c(bS, bW) ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ), data=d
+)
+plot(coeftab(m_waffle_divorce), pars=c("bS", "bW"))
+```
+
+The estimate for *bW* is very small, with a large standard deviation. So we can say that the number of Waffle Houses in the state (*W*) has no causal influence on the number of divorces in that state.
+
+
+**6H2.** Build a series of models to test the implied conditional independencies of the causal graph you used in the previous problem. If any of the tests fail, how do you think the graph needs to be amended? Does the graph need more or fewer arrows? Feel free to nominate variables that aren't in the data.
+
+The implied conditional independencies of the causal graph from the previous problem are:
+
+```{r}
+impliedConditionalIndependencies(waffle_dag)
+```
+
+Let's test these three conditional independencies, in turn:
+
+  1. `A _||_ W | S`
+  ```{r}
+  m_ci1 <- quap(
+    alist(
+      A ~ dnorm(mu, sigma),
+      mu <- a + bW*W + bS*S,
+      a ~ dnorm(0, 1),
+      c(bW, bS) ~ dnorm(0, 1),
+      sigma ~ dexp(1)
+    ), data=d
+  )
+  plot(coeftab(m_ci1), pars=c("bW", "bS"))
+  ```
+  
+  The estimate for the parameter `bW` should be around zero, and indeed it is.
+  
+  2. `D _||_ S | A, M, W`
+  ```{r}
+  m_ci2 <- quap(
+    alist(
+      D ~ dnorm(mu, sigma),
+      mu <- a + bS*S + bA*A + bM*M + bW*W,
+      a ~ dnorm(0, 1),
+      c(bS, bA, bM, bW) ~ dnorm(0, 1),
+      sigma ~ dexp(1)
+    ), data=d
+  )
+  plot(coeftab(m_ci2), pars=c("bS", "bA", "bM", "bW"))
+  ```
+  
+  The estimate for the parameter `bS` should be around zero, and indeed it is.
+  
+  3. `M _||_ W | S`
+  ```{r}
+  m_ci3 <- quap(
+    alist(
+      M ~ dnorm(mu, sigma),
+      mu <- a + bS*S + bW*W,
+      a ~ dnorm(0, 1),
+      c(bS, bW) ~ dnorm(0, 1),
+      sigma ~ dexp(1)
+    ), data=d
+  )
+  plot(coeftab(m_ci3), pars=c("bW", "bS"))
+  ```
+  
+  The estimate for the parameter `bW` should be around zero, and indeed it is.
+
+
+All three problems below are based on the same data. Data in `data(foxes)` are 116 foxes from 30 different urban groups in England. These foxes are like street gangs. Group size varies from 2 to 8 individuals. Each group maintains its own urban territory. Some territories are larger than others. The `area` variable encodes this information. Some territories also have more `avgfood` than others. We want to model the `weight` of each fox. For the problems below, assume the following DAG:
+
+```{r echo=FALSE}
+fox_dag <- dagitty("dag{avgfood -> groupsize -> weight; avgfood -> weight; area -> avgfood}")
+coordinates(fox_dag) <- list(x=c(avgfood=0, area=0.5, weight=0.5, groupsize=1), y=c(avgfood=0, groupsize=0, area=-0.5, weight=0.5))
+drawdag(fox_dag)
+```
+
+
+**6H3.** Use a model to infer the total causal influence of `area` on `weight`. Would increasing the area available to each fox make it heavier (healthier)? You might want to standardize the variables. Regardless, use prior predictive simulation to show that your model's prior predictions stay within the possible outcome range.
+
+Load and standardize the data:
+
+```{r}
+data(foxes)
+d <- foxes
+d$A <- standardize(foxes$area)
+d$F <- standardize(foxes$avgfood)
+d$G <- standardize(foxes$groupsize)
+d$W <- standardize(foxes$weight)
+```
+
+There are two paths from *area* to *weight*: $area \to avgfood \to groupsize \to weight$ and $area \to avgfood \to weight$. There are no open backdoor paths, so I only need to include area. I'll use the following model:
+
+$W_{i} = Normal(\mu_{i}, \sigma)$
+
+$\mu_{i} = \alpha + \beta_{A}A$
+
+$\alpha \sim Normal(0, 0.1)$
+
+$\beta_{A} \sim Normal(0, 0.5)$
+
+$\sigma \sim Exponential(1)$
+
+Prior predictive simulation:
+
+```{r}
+N <- 1e2
+a <- rnorm(N, mean=0, sd=0.1)
+bA <- rnorm(N, mean=0, sd=0.5)
+plot(NULL, xlim=range(d$A), ylim=c(-mean(d$weight)/sd(d$weight) - 0.2, max(d$W) + 0.2), xlab="Area", ylab="Weight")
+abline(h=-mean(d$weight)/sd(d$weight), lt='dashed')
+abline(h=max(d$W), lt='dashed')
+for (i in 1:N) {
+  curve(a[i] + bA[i]*x, from=-3, to=3, add=TRUE, col=col.alpha("gray", 0.2))
+}
+```
+
+These priors seem reasonable: both negative and positive associations are possible, but very few priors fall outside the limits of the maximum weight and zero weight for ± 2 standard deviations from the mean area.
+
+Parameter estimation:
+
+```{r}
+m1_foxes <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bA*A,
+    a ~ dnorm(0, 0.1),
+    bA ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+tryCatch(plot(coeftab(m1_foxes)), error = function(e) precis(m1_foxes))
+```
+
+Conditional on the model and the priors, the total causal effect of *area* on *weight* is estimated to be around 0.
+
+
+**6H4.** Now infer the causal impact of adding food to a territory. Would this make foxes heavier? Which covariates do you need to adjust for to estimate the total causal influence of food?
+
+No adjustment for covariates is needed to estimate the total cuasal influence of food on weight. The total influence occurs through a direct path $food \to weight$ and an indirect path $food \to groupsize \to weight$.
+
+```{r}
+m2_foxes <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bF*F,
+    a ~ dnorm(0, 0.1),
+    bF ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+tryCatch(plot(coeftab(m2_foxes)), error = function(e) precis(m2_foxes))
+post_m2 <- extract.samples(m2_foxes)
+dens(post_m2$bF)
+```
+
+Food has no effect on weight; the posterior distribution of `bF` is centered around zero.
+
+
+**6H5.** Now infer the causal impact of group size. Which covariates do you need to adjust for? Looking at the posterior distribution of the resulting model, what do you think explains these data? That is, can you explain the estimates for all three problems? How do they go together?
+
+In this case, there is a direct path $groupsize \to weight$ and an open backdoor path $groupsize \leftarrow avgfood \to weight$. To close this open backdoor path, we need to condition on `avgfood`.
+
+```{r}
+adjustmentSets(fox_dag, exposure="groupsize", outcome="weight")
+```
+```{r}
+m3_foxes <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bG*G + bF*F,
+    a ~ dnorm(0, 0.1),
+    c(bF, bG) ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+tryCatch(plot(coeftab(m3_foxes)), error = function(e) precis(m3_foxes))
+post_m3 <- extract.samples(m3_foxes)
+dens(post_m3$bG)
+```
+
+The posterior parameter estimate for `bG` shows that a larger group size is associated with a lower weight (`bG` is reliably negative) after conditioning on `avgfood`. The positive estimate for `bF` shows that higher `avgfood` is associated with higher weight, after conditioning on `groupsize`. Both of these are results: more food for a given group size means more food per individual, and thus higher weight, and a larger group size for a given amount of food means less food per individual, and thus lower weight. In spite of this, as seen in the previous question, the total effect of food on weight is zero, as the increase in group size counteracts the increased amount the food. This is an example of post-treatment bias.
+
+**6H6.** Consider your own research question. Draw a DAG to represent it. What are the testable implications of your DAG? Are there any variables you could condition on to close all backdoor paths? Are there unobserved variables that you have omitted? Would a reasonable colleague imagine additional threats to causal inference that you have ignored?
+
+Research question: how does the time of professional experience influence wage?
+
+Let's draw a DAG involving age (A), the number of years of experience (E), the wage (W) and the skills level (S).
+
+```{r}
+wage_dag <- dagitty("dag{A -> E; E -> S -> W; E -> W; A -> W}")
+coordinates(wage_dag) <- list(x=c(A=0, E=0, S=1, W=1), y=c(E=-1, W=0, A=0, S=-1))
+drawdag(wage_dag)
+```
+
+```{r}
+impliedConditionalIndependencies(wage_dag)
+```
+
+If this DAG is true, age and skills should be independent of each other, conditional on experience.
+
+If we're interested of the influence of experience on wage, then the backdoor path $A \to E \to W$ should be closed. We can do this by conditioning on A.
+
+```{r}
+adjustmentSets(wage_dag, exposure="E", outcome="W")
+```
+
+Two obvious unobserved variables are country (wage levels vary widely between countries), education and industry. A reasonable colleague would note the absence of these unobserved variables in the analysis as being critical.
+
+**6H7.** For the DAG you made in the previous problem, can you write a data generating simulation for it? Can you design one or more statistical models to produce causal estimates? If so, try to calculate interesting counterfactuals. If not, use the simulation to estimate the size of the bias you might expect. Under what conditions, would you, for example, infer the opposite of a true causal effect?
+
+```{r}
+N <- 1e3
+A <- runif(N, min=18, max=85)
+E <- A - (18 + rpois(N, 5))
+S <- rnorm(N, mean=0.1*E, sd=1)
+W <- rnorm(N, mean=(30 + 2*E + 4*S + 0.5*A), sd=2)
+d <- data.frame(A=A, E=E, S=S, W=W)
+pairs(~ A + E + S + W, data=d, col=rangi2)
+```
+
+```{r}
+# model including E and S as predictors
+mH7_1 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bS*S + bE*E,
+    a ~ dnorm(30, 2),
+    c(bS, bE) ~ dnorm(2, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+precis(mH7_1)
+```
+
+We can see that the estimate for `bE` is wrong, and is instead the combined effect of age and experience. This is an example of multicollinearity, as age and experience are highly correlated.
+
+By including age in the model we can disentangle these two effects:
+
+```{r}
+# models including E, S, and A as predictors
+mH7_2 <- quap(
+  alist(
+    W ~ dnorm(mu, sigma),
+    mu <- a + bS*S + bE*E + bA*A,
+    a ~ dnorm(30, 2),
+    c(bS, bE, bA) ~ dnorm(2, 0.5),
+    sigma ~ dexp(1)
+  ), data=d
+)
+precis(mH7_2)
+```
+

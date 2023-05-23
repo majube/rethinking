@@ -1,0 +1,272 @@
+---
+title: "Notebook Exercises Chapter 12"
+author: "Max Beauchez"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, error = TRUE)
+library(rethinking)
+```
+
+**12E1.** What is the difference between an *ordered* categorical variable and an unordered one? Define and then give an example of each.
+
+An unordered categorical variable can take on a limited number of values, but there is no significance to these outcome values. An ordered categorical variable are can equally take a on a limited number of values, but these values now have an order, meaning that value $k_{i+1} > k_{i}$, but the differences between subsequent categories is not necessarily constant.
+
+An example of an unordered categorical variable is blood type. An example of an ordered categorical variable is language skill as measured by the CERF (A1, A2, B1, B2, C1, C2).
+
+
+**12E2.** What kind of link function does an ordered logistic regression employ? How does it differ from an ordinary logit link?
+
+An ordered logistic regression uses the cumulative logit link function, which is defined below:
+
+$p_{1} = q_{1}$
+
+$p_{k} = q_{k} - q_{k-1}$ for 1 < k < K
+
+$p_{K} = 1 - q_{K-1}$
+
+$logit(q_{k}) = \kappa_{k} - \phi{i}$
+
+It differs from the ordinary logit link, by giving the cumulative log-odds of the outcome variable variable: $log\,{{Pr(y_{i} \leq k)} \over {1 - Pr(y_{i} \leq k)}}$. The regular logit link function gives the log-odds of a certain outcome value: $log\,{{Pr(y_{i}=k)} \over {1-Pr(y_{i}=k)}}$.
+
+
+**12E3.** When count data are zero-inflated, using a model that ignores zero-inflation will tend to induce which kind of inferential error?
+
+The excess of zero values tends to lead to underestimates of the rates (Poisson) or probabilities of success (binomial).
+
+
+**12E4.** Over-dispersion is common in count data. Give an example of a natural process that might produce over-dispersed counts. Can you also give an example of a process that might produced *under*-dispersed counts?
+
+The number of books read per year is an example of a process that would produce zero-inflated counts: many people don't read any books at all. An example of a process that might produce under-dispersed counts is the number of cars per household in a highly car-dependent society.
+
+
+**12M1.** At a certain university, employees are annually rated from 1 to 4 on their productivity, with 1 being least productive and 4 most productive. In a certain department at this certain university in a certain year, the numbers of employees receiving each rating were (from 1 to 4): 12, 36, 7, 41. Compute the log cumulative odds of each rating.
+
+```{r}
+k <- c(12, 36, 7, 41)
+pr_k <- k / sum(k)
+cum_pr_k <- cumsum(pr_k)
+(lco <- sapply(cum_pr_k, function(x) log((x/(1-x)))))
+```
+
+**12M2.** Make a version of Figure 12.5 for the employee ratings data given just above.
+
+```{r}
+offset <- 0.03
+plot(1:4, cum_pr_k, type="b", xlab="rating" ,
+      ylab="cumulative proportion", ylim=c(0, 1), xaxt="n")
+axis(1, at=1:4)
+for (i in 1:4) {
+  lines(c(i, i), c(0, cum_pr_k[i]), col="grey", lwd=4)
+  lines(c(i + offset, i + offset), c(ifelse(i == 1, 0, cum_pr_k[i - 1]), cum_pr_k[i]), col="blue", lwd=4)
+  text(i + 2.5*offset, y=ifelse(i == 1, cum_pr_k[i]/2, cum_pr_k[i] - pr_k[i]/2), labels=i)
+}
+```
+
+
+**12M3.** Can you modify the derivation of the zero-inflated Poisson distribution (ZIPoisson) from the chapter to construct a zero-inflated binomial distribution?
+
+Let $p_{zero}$ be the probability of a zero value, $n$ be the number of trials, and $q$ the probability of success of the binomial distribution.
+
+$Pr(0|p_{zero}, q, n) = p_{zero} + (1-p_{zero})(1-q)^n$
+
+And the probability of a non-zero value:
+
+$Pr(y|y>0, p_{zero}, q, n)= (1-p_{zero})\times{n \choose y}q^y(1-q)^{n-y}$
+
+
+**12H1.** In 2014, a paper was published that was entitled "Female hurricanes are deadlier than male hurricanes." As the title suggests, the paper claimed that hurricanes with female names have caused greater loss of life, and the explanation given is that people unconsciously rate female hurricanes as less dangerous and so are less likely to evacuate. Statisticians severely criticized the paper after publication. Here, you'll explore the complete data used in the paper and consider the hypothesis that hurricanes with female names are deadlier. Load the data with
+
+```{r}
+library(rethinking)
+data(Hurricanes)
+```
+
+Acquaint yourself with the columns by inspecting the help `?Hurricanes`. In this problem, you'll focus on predicting `deaths` using the `femininity` as a predictor. You can use `quap` or `ulam`. Compare the model to an intercept-only Poisson model of `deaths`. How strong is the association between femininity of name and deaths? Which storms does the model fit (retrodict) well? Which storms does it fit poorly?
+
+```{r warning=FALSE, message=FALSE}
+d <- Hurricanes
+dat <- list(D = d$deaths, F = standardize(d$femininity))
+m <- ulam(
+  alist(
+    D ~ dpois(lambda),
+    log(lambda) <- a + bF*F,
+    a ~ dnorm(1, 1),
+    bF ~ dnorm(0, 1)
+  ), data=dat, chains=4, cores=4, log_lik=TRUE
+)
+m_only_intercept <- ulam(
+  alist(
+    D ~ dpois(lambda),
+    log(lambda) <- a,
+    a ~ dnorm(1, 1)
+  ), data=dat, chains=4, cores=4, log_lik=TRUE
+)
+precis(m, pars=c("a", "bF"))
+precis(m_only_intercept, pars=c("a"))
+compare(m, m_only_intercept, func=WAIC)
+```
+
+The association between femininity and number of storm deaths is very small - an increase in the femininity score of one standard deviation is only associated with an increase of `r coef(m)["bF"]` in the log-rate of deaths. As such, we see that the model with an intercept only has a slightly higher WAIC score.
+
+
+```{r}
+plot(dat$F, dat$D, col=rangi2, xlab="femininity (std)", ylab="deaths")
+N <- 5e2
+F_seq <- list(F=seq(from=-2, to=2, length.out=N))
+lambda <- link(m, F_seq)
+lambda.mean <- apply(lambda, 2, mean)
+lambda.PI <- apply(lambda, 2, PI, prob=0.89)
+lines(F_seq$F, lambda.mean)
+shade(lambda.PI, F_seq$F)
+sim_deaths <- sim(m, F_seq)
+sim_deaths.PI <- apply(sim_deaths, 2, PI, prob=0.89)
+lines(F_seq$F, sim_deaths.PI[1, ], lt="dashed")
+lines(F_seq$F, sim_deaths.PI[2, ], lt="dashed")
+pred_deaths <- sim(m, dat$F)
+pred_deaths.mean <- apply(pred_deaths, 2, mean)
+max_error <- 1.5*sd(dat$D)
+pred_inaccurate <- (dat$D - pred_deaths.mean) > max_error
+text(dat$F[pred_inaccurate] + 0.17, dat$D[pred_inaccurate], d$name[pred_inaccurate])
+```
+
+In this plot the mean predicted number of deaths is given by the solid line, the 89% probability interval is shaded, and the 89% probability interval of the simulated number of deaths is given by the dashed lines. Because the estimated association between femininity and deaths is very small, the line is almost flat (horizontal). Storms whose actual death count differs from the mean predicted one by more than 1.5× the standard deviation in deaths are labelled. It seems that there are several very 'feminine' storms with a high death count.
+
+
+**12H2.** Counts are nearly always over-dispersed relative to Poisson. So fit a gamma-Poisson (aka negative-binomial) model to predict `deaths` using `feminity`. Show that the over-dispersed model no longer shows as precise a positive association between femininity and deaths, with an 89% interval that overlaps zero. Can you explain why the association diminished in strength?
+
+```{r warning=FALSE, message=FALSE}
+m_od <- ulam(
+  alist(
+    D ~ dgampois(lambda, phi),
+    log(lambda) <- a + bF*F,
+    a ~ dnorm(1, 1),
+    bF ~ dnorm(0, 1),
+    phi ~ dexp(1)
+  ), data=dat, chains=4, cores=4
+)
+precis(m_od)
+```
+
+The positive association between femininity and deaths is still there, but the value is slightly smaller and the uncertainty is much greater, with the 89% interval now overlapping zero.
+
+```{r}
+plot(dat$F, dat$D, col=rangi2, xlab="femininity (std)", ylab="deaths")
+N <- 1e3
+F_seq <- list(F=seq(from=-2, to=2, length.out=N))
+lambda <- link(m_od, F_seq)
+lambda.mean <- apply(lambda, 2, mean)
+lambda.PI <- apply(lambda, 2, PI, prob=0.89)
+lines(F_seq$F, lambda.mean)
+shade(lambda.PI, F_seq$F)
+sim_deaths <- sim(m_od, F_seq)
+sim_deaths.PI <- apply(sim_deaths, 2, PI, prob=0.89)
+lines(F_seq$F, sim_deaths.PI[1, ], lt="dashed")
+lines(F_seq$F, sim_deaths.PI[2, ], lt="dashed")
+pred_deaths <- sim(m, dat$F)
+pred_deaths.mean <- apply(pred_deaths, 2, mean)
+max_error <- 1.5*sd(dat$D)
+pred_inaccurate <- (dat$D - pred_deaths.mean) > max_error
+text(dat$F[pred_inaccurate] + 0.17, dat$D[pred_inaccurate], d$name[pred_inaccurate])
+```
+
+As before, in this plot the mean predicted number of deaths is given by the solid line, the 89% probability interval is shaded, and the 89% probability interval of the simulated number of deaths is given by the dashed lines. Storms whose actual death count differs from the mean predicted one by more than 1.5× the standard deviation in deaths are labelled. We can see that the uncertainty of the rate and of the predicted deaths is now much greater.
+
+```{r}
+post <- extract.samples(m_od)
+N_lines <- 50
+lines <- sample(1:length(post$phi), N_lines)
+par(mfrow = c(1, 3))
+for (F in -1:1) {
+  curve(
+    dgamma2(
+      x, 
+      exp(mean(post$a) + mean(post$bF)*F),
+      mean(post$phi)),
+    from=0, to=70,
+    ylim=c(0, 0.25),
+    xlab="Poisson rate", 
+    ylab="density", 
+    lwd=2, 
+    main=paste("femininity (std) =", F))
+  for (i in 1:N_lines) {
+    curve(
+      dgamma2(
+        x, 
+        exp(post$a[lines[i]] + post$bF[lines[i]]*F),
+        post$phi[lines[i]]),
+      from=0, to=70,
+      col=col.alpha("gray", 0.2), 
+      add=TRUE)
+  }
+}
+```
+
+The association is diminished in strength because for each storm the rate parameter is now drawn from a gamma-distribution of Poisson rates that is parametrized by both the femininity predictor and the scale parameter. Above are 100 random gamma-distributions from the posterior, each drawn for three values of standardized femininity. These distributions are all skewed towards zero by the scale parameter, which diminishes the influence of the `bF` parameter.
+
+
+**12H3.** In the data, there are two measures of a hurricane's potential to cause death: `damage_norm` and `min_pressure`. Consult `?Hurricanes` for their meanings. It makes some sense to image that femininity of a name matters more when the hurricane is itself deadly. This implies an interaction between `femininity` and either or both of `damage_norm` and `min_pressure`. Fit a series of models evaluating these interactions. Interpret and compare the models. In interpreting the estimates, it may help to generate counterfactual predictions contrasting hurricanes with masculine and feminine names. Are the effect sizes plausible?
+
+```{r warning=FALSE, message=FALSE}
+dat <- list(D=d$deaths, F=standardize(d$femininity), P=standardize(d$min_pressure), C=standardize(d$damage_norm))
+m_fp <- ulam(
+  alist(
+    D ~ dgampois(lambda, phi),
+    log(lambda) <- a + bF*F + bP*P + bFP*F*P,
+    a ~ dnorm(1, 1),
+    c(bF, bP, bFP) ~ dnorm(0, 1),
+    phi ~ dexp(1)
+  ), data=dat, chains=4, cores=4
+)
+m_fc <- ulam(
+  alist(
+    D ~ dgampois(lambda, phi),
+    log(lambda) <- a + bF*F + bC*C + bFC*F*C,
+    a ~ dnorm(1, 1),
+    c(bF, bC, bFC) ~ dnorm(0, 1),
+    phi ~ dexp(1)
+  ), data=dat, chains=4, cores=4
+)
+m_fcp <- ulam(
+  alist(
+    D ~ dgampois(lambda, phi),
+    log(lambda) <- a + bF*F + bFC*F*C + bFP*F*P + bFPC*F*P*C,
+    a ~ dnorm(1, 1),
+    c(bF, bFC, bFP, bFPC) ~ dnorm(0, 1),
+    phi ~ dexp(1)
+  ), data=dat, chains=4, cores=4
+)
+precis(m_fp, omit="lambda")
+precis(m_fc, omit="lambda")
+precis(m_fcp, omit="lambda")
+```
+
+```{r}
+plot(coeftab(m_fp, m_fc, m_fcp))
+```
+
+
+
+**12H4.** In the original hurricanes paper, storm damage (`damage_norm`) was used directly. This assumption implies that mortality increases exponentially with a linear increase in storm strength, because a Poisson regression uses a log link. So it's worth exploring an alternative hypothesis: that the logarithm of a storm strength is what matters. Explore this by using the logarithm of `damage_norm` as predictor. Using the best model structure from the previous problem, compare a model that uses `log(damage_norm)` to a model that uses `damage_norm` directly. Compare their PSIS/WAIC values as well as their implied predictions. What do you conclude?
+
+```{r}
+
+```
+
+
+
+**12H5.** One hypothesis from a developmental psychology, usually attributed to Carol Gilligan, proposes that women and men have different average tendencies in moral reasoning. Like most hypotheses in social psychology, it is descriptive, not causal. The notion is that women are more concerned with care (avoiding harm), while men are more concerned with justice and rights. Evaluate this hypothesis using the `Trolley` data, supposing that `contact` provides a proxy for physical harm Are women more or less bothered by contact than are men, in these data? Figure out the model(s) that is needed to address this question.
+
+
+**12H6.** The data in `data(Fish)` are records of visits to a national park. See `?Fish` for details. The question of interest is how many fish an average visitor takes per hour, when fishing. The problem is that not everyone tried to fish, so the `fish_caught` numbers are zero-inflated. As with the monks example in the chapter, there is a process that determines who is fishing (working) and another process that determines fish per hour (manuscripts per day), conditional on fishing (working). We want to model both. Otherwise we'll end up with an underestimate of rate of fish extraction from the park. 
+
+You will model these data using zero-inflated Poisson GLMs. Predict `fish_caught` as a function of any of the other variables you think are relevant. One thing you must do, however, is use a proper Poisson offset/exposure in the Poisson portion of the zero-inflated model. Then use the `hours` variable to construct the offset. This will adjust the model for the differing amount of time individuals spent in the park.
+
+
+**12H7.** In the trolley data—`data(Trolley)`—we saw how education level (modeled as an ordered category) is associated with responses. But is this association causal? One plausible confound is that education is also associated with age, through a causal process: People are older when they finish school than when they begin it. Reconsider the Trolley data in this light. Draw a DAG that represents hypothetical causal relationships among response, education, and age. Which statistical or models do you need to evaluate the causal influence of education on responses? Fit these models to the trolley data. What do you conclude about the causal relationships among these three variables?
+
+
+**12H8.** Consider one more variable in the trolley data: Gender. Suppose that gender might influence education as well as response directly. Draw the DAG now that includes response, education, age and gender. Using only the DAG, is it possible that the inferences from H7 above are confounded by gender? If so, define any additional models you need to infer the causal influence of education on response. What do you conclude?
+
+
